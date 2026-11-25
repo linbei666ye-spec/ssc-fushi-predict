@@ -6,7 +6,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="极速预测"
+        android:label="极速复式预测Pro"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
 
