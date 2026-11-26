@@ -222,6 +222,89 @@ function saveLocal(){
     setMessage("本地保存失败，可能是手机存储空间不足。");
   }
 }
+// 从 Android 后台同步开奖记录和预测记录
+function syncBackgroundData(){
+  try{
+    if(!window.AndroidBridge ||
+       typeof AndroidBridge.getBackgroundData !== "function"){
+      return false;
+    }
+
+    const raw = AndroidBridge.getBackgroundData();
+    if(!raw)return false;
+
+    const data = JSON.parse(raw);
+    let changed = false;
+
+    // 同步后台历史开奖
+    if(Array.isArray(data.draws)){
+      const before = draws.length;
+      mergeDraws(data.draws);
+      if(draws.length !== before)changed = true;
+    }
+
+    // 同步后台预测记录
+    if(Array.isArray(data.records)){
+      const map = new Map();
+
+      records.forEach(r=>{
+        if(r && r.issue)map.set(String(r.issue),r);
+      });
+
+      data.records.forEach(bg=>{
+        if(!bg || !bg.issue)return;
+
+        const key = String(bg.issue);
+        const local = map.get(key);
+
+        if(!local){
+          map.set(key,bg);
+          changed = true;
+          return;
+        }
+
+        // 后台已结算的状态优先于本地待开奖状态
+        if(bg.systems){
+          if(!local.systems)local.systems = {};
+
+          SYSTEMS.forEach(sys=>{
+            const b = bg.systems[sys.id];
+            const l = local.systems[sys.id];
+
+            if(!b)return;
+
+            if(!l || (l.status==="待开奖" &&
+              (b.status==="中" || b.status==="挂"))){
+              local.systems[sys.id] = b;
+              changed = true;
+            }
+          });
+        }
+
+        if(bg.singleCode){
+          if(!local.singleCode ||
+             (local.singleCode.status==="待开奖" &&
+             (bg.singleCode.status==="中" ||
+              bg.singleCode.status==="挂"))){
+            local.singleCode = bg.singleCode;
+            changed = true;
+          }
+        }
+      });
+
+      records = Array.from(map.values())
+        .sort((a,b)=>issueValue(b.issue)-issueValue(a.issue))
+        .slice(0,300);
+    }
+
+    if(changed)saveLocal();
+
+    return true;
+  }catch(e){
+    console.log("后台数据同步失败：",e);
+    return false;
+  }
+}
 
 function normalizeCode(value){
   if(Array.isArray(value))value=value.join(",");
@@ -1110,8 +1193,10 @@ async function loadData(){
 
     mergeDraws([{issue:current.issue,code:current.code}]);
 
+    syncBackgroundData();
     settleRecords();
     createPredictions();
+    syncBackgroundData();
     saveLocal();
     render();
 
@@ -1252,9 +1337,17 @@ function clearRecords(){
 }
 
 loadLocal();
+syncBackgroundData();
 render();
 loadData();
+
 setInterval(countdownTick,1000);
+setInterval(()=>{
+  if(syncBackgroundData()){
+    settleRecords();
+    render();
+  }
+},45000);
 </script>
 </body>
 </html>
