@@ -45,7 +45,7 @@ public class MainActivity extends Activity {
                 data.put("last_issue", prefs.getString("last_issue", ""));
                 data.put("last_numbers", prefs.getString("last_numbers", ""));
                 data.put("next_issue", prefs.getString("next_issue", ""));
-                data.put("last_update", prefs.getString("last_update", ""));
+                data.put("last_update", prefs.getLong("last_update", 0));
 
                 return data.toString();
 
@@ -59,6 +59,26 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+// 安排后台定期补漏任务
+Constraints constraints = new Constraints.Builder()
+    .setRequiredNetworkType(NetworkType.CONNECTED)
+    .build();
+
+PeriodicWorkRequest workRequest =
+    new PeriodicWorkRequest.Builder(
+        PredictionWorker.class,
+        15,
+        TimeUnit.MINUTES
+    )
+    .setConstraints(constraints)
+    .build();
+
+WorkManager.getInstance(this)
+    .enqueueUniquePeriodicWork(
+        "speedy10_background_check",
+        ExistingPeriodicWorkPolicy.KEEP,
+        workRequest
+    );
         // 启动后台开奖检查服务
         Intent serviceIntent = new Intent(this, PredictionService.class);
 
