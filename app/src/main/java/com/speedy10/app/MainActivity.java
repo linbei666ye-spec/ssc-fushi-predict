@@ -13,6 +13,13 @@ import android.webkit.WebViewClient;
 import android.view.ViewGroup;
 
 import org.json.JSONObject;
+import androidx.work.Constraints;
+import androidx.work.ExistingPeriodicWorkPolicy;
+import androidx.work.NetworkType;
+import androidx.work.PeriodicWorkRequest;
+import androidx.work.WorkManager;
+
+import java.util.concurrent.TimeUnit;
 
 public class MainActivity extends Activity {
 
