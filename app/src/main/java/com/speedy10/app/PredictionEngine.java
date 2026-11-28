@@ -1,4 +1,3 @@
-
 package com.speedy10.app;
 
 import android.content.Context;
@@ -382,126 +381,115 @@ public class PredictionEngine {
         }
     }
 
+    // 复式 V3.0：按位置独立计算，单码 V2.2 保持不变。
     private static List<Integer> chooseNumbers(
         List<Draw> data, int position
     ) {
         int start = Math.max(0, data.size() - 100);
         List<Draw> list = data.subList(start, data.size());
+        int size = list.size();
 
-        double[] freq = new double[10];
-        double[] r5 = new double[10];
-        double[] r10 = new double[10];
-        double[] r20 = new double[10];
-        double[] r30 = new double[10];
-        double[] previous = new double[10];
-
+        double[] c8 = new double[10];
+        double[] c10 = new double[10];
+        double[] c20 = new double[10];
+        double[] c50 = new double[10];
+        double[] c100 = new double[10];
         int[] last = new int[10];
         Arrays.fill(last, -1);
 
-        for (int i = 0; i < list.size(); i++) {
-            int n = list.get(i).code[position];
-            freq[n]++;
-            last[n] = i;
+        for (int i = 0; i < size; i++) {
+            int number = list.get(i).code[position];
+            c100[number]++;
+            last[number] = i;
+            if (i >= Math.max(0, size - 8)) c8[number]++;
+            if (i >= Math.max(0, size - 10)) c10[number]++;
+            if (i >= Math.max(0, size - 20)) c20[number]++;
+            if (i >= Math.max(0, size - 50)) c50[number]++;
         }
 
-        countWindow(list, position, 5, r5);
-        countWindow(list, position, 10, r10);
-        countWindow(list, position, 20, r20);
-        countWindow(list, position, 30, r30);
+        int len8 = Math.max(1, Math.min(8, size));
+        int len10 = Math.max(1, Math.min(10, size));
+        int len20 = Math.max(1, Math.min(20, size));
+        int len50 = Math.max(1, Math.min(50, size));
+        int len100 = Math.max(1, size);
 
-        int previousStart = Math.max(0, list.size() - 20);
-        int previousEnd = Math.max(0, list.size() - 10);
+        // 趋势：最近10期与此前20期比较。
+        int previousStart = Math.max(0, size - 30);
+        int previousEnd = Math.max(0, size - 10);
+        int previousLength = Math.max(1, previousEnd - previousStart);
+        double[] previous = new double[10];
 
         for (int i = previousStart; i < previousEnd; i++) {
             previous[list.get(i).code[position]]++;
         }
 
-        double volatility = 0;
+        // 稳定性：比较四个时间块的出现率与整体出现率的偏差。
+        double[] stabilityDeviation = new double[10];
+        int validBlocks = 0;
 
-        for (int n = 0; n < 10; n++) {
-            double recent = r10[n] /
-                Math.max(1, Math.min(10, list.size()));
+        for (int block = 0; block < 4; block++) {
+            int from = block * size / 4;
+            int to = (block + 1) * size / 4;
+            int blockLength = to - from;
+            if (blockLength <= 0) continue;
+            validBlocks++;
 
-            double before = previous[n] /
-                Math.max(1, previousEnd - previousStart);
+            int[] blockCounts = new int[10];
+            for (int i = from; i < to; i++) {
+                blockCounts[list.get(i).code[position]]++;
+            }
 
-            volatility += Math.abs(recent - before);
+            for (int n = 0; n < 10; n++) {
+                double blockRate = blockCounts[n] / (double) blockLength;
+                double overallRate = c100[n] / len100;
+                stabilityDeviation[n] += Math.abs(blockRate - overallRate);
+            }
         }
-
-        volatility /= 10;
-
-        double factor = Math.min(1, volatility * 5);
-
-        double[] weights = {
-            0.25 - 0.05 * factor,
-            0.08 + 0.02 * factor,
-            0.18 + 0.03 * factor,
-            0.18,
-            0.14,
-            0.05,
-            0.12
-        };
 
         double[] scores = new double[10];
 
         for (int n = 0; n < 10; n++) {
-            double longRate = freq[n] /
-                Math.max(1, list.size()) * 100;
+            double rate8 = c8[n] / len8 * 100.0;
+            double rate10 = c10[n] / len10 * 100.0;
+            double rate20 = c20[n] / len20 * 100.0;
+            double rate50 = c50[n] / len50 * 100.0;
+            double rate100 = c100[n] / len100 * 100.0;
 
-            double fiveRate = r5[n] /
-                Math.max(1, Math.min(5, list.size())) * 100;
+            double recentRate = c10[n] / len10;
+            double previousRate = previous[n] / previousLength;
+            double trendScore = Math.max(0.0, Math.min(100.0,
+                50.0 + (recentRate - previousRate) * 250.0));
 
-            double tenRate = r10[n] /
-                Math.max(1, Math.min(10, list.size())) * 100;
+            double averageDeviation = validBlocks == 0 ? 0.0
+                : stabilityDeviation[n] / validBlocks;
+            double stabilityScore = Math.max(0.0,
+                100.0 - averageDeviation * 100.0);
 
-            double twentyRate = r20[n] /
-                Math.max(1, Math.min(20, list.size())) * 100;
-
-            double thirtyRate = r30[n] /
-                Math.max(1, Math.min(30, list.size())) * 100;
-
-            int omission = last[n] == -1
-                ? list.size()
-                : list.size() - 1 - last[n];
-
-            double omissionScore =
-                Math.min(omission, 20) / 20.0 * 100;
-
-            double recent = r10[n] /
-                Math.max(1, Math.min(10, list.size()));
-
-            double before = previous[n] /
-                Math.max(1, previousEnd - previousStart);
-
-            double trend = Math.max(0, Math.min(100,
-                50 + (recent - before) * 250));
+            int omission = last[n] < 0 ? size : size - 1 - last[n];
+            double omissionScore = Math.min(omission, 30) / 30.0 * 100.0;
 
             scores[n] =
-                longRate * weights[0] +
-                fiveRate * weights[1] +
-                tenRate * weights[2] +
-                twentyRate * weights[3] +
-                thirtyRate * weights[4] +
-                omissionScore * weights[5] +
-                trend * weights[6];
+                rate100 * 0.32 +
+                rate8 * 0.10 +
+                rate10 * 0.10 +
+                rate20 * 0.20 +
+                rate50 * 0.12 +
+                trendScore * 0.10 +
+                stabilityScore * 0.04 +
+                omissionScore * 0.02;
         }
 
         List<Integer> result = new ArrayList<>();
-
         for (int i = 0; i < 7; i++) {
             int best = -1;
-
             for (int n = 0; n < 10; n++) {
                 if (result.contains(n)) continue;
-
                 if (best == -1 || scores[n] > scores[best]) {
                     best = n;
                 }
             }
-
             if (best >= 0) result.add(best);
         }
-
         return result;
     }
 
@@ -742,7 +730,7 @@ public class PredictionEngine {
 
             JSONObject record = new JSONObject();
             record.put("issue", nextIssue);
-            record.put("algorithm", "V2.2");
+            record.put("algorithm", "复式V3.0/单码V2.2");
             record.put("createdAt", System.currentTimeMillis());
 
             JSONObject systems = new JSONObject();
